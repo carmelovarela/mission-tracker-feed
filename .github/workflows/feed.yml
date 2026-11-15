@@ -1,0 +1,91 @@
+# Workflow for the public feed repository (copy to .github/workflows/feed.yml there).
+#
+# It lives in the public repo, not in mission-tracker, because Actions minutes are free for
+# public repositories; a run every 15 minutes would exceed the private-repo allowance.
+#
+# Branches in the feed repo:
+#   gh-pages  feed.json + state/, replaced by a single commit each run (no history growth);
+#             served by GitHub Pages as https://<owner>.github.io/<repo>/feed.json
+#   main      this workflow, README, and history/<year>-W<week>.json weekly snapshots
+#
+# Secret: MISSION_TRACKER_DEPLOY_KEY, the private half of a read-only deploy key on the private
+# mission-tracker repository (to check out feedgen). FEEDGEN_REF picks the branch to run.
+name: feed
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # GitHub may start scheduled runs some minutes late
+  workflow_dispatch:
+
+concurrency:
+  group: feed
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  FEEDGEN_REF: own-feed   # switch to main once own-feed is merged
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out feedgen
+        uses: actions/checkout@v4
+        with:
+          repository: carmelovarela/mission-tracker
+          ref: ${{ env.FEEDGEN_REF }}
+          ssh-key: ${{ secrets.MISSION_TRACKER_DEPLOY_KEY }}
+          path: src
+          sparse-checkout: |
+            feedgen
+            mission-trackerTests/Fixtures
+            mission-tracker/Resources/Fixtures
+
+      - name: Check out the published feed
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+        continue-on-error: true   # first run: the branch doesn't exist yet
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test feedgen
+        working-directory: src
+        run: python -m unittest discover -s feedgen/tests -t .
+
+      - name: Build the feed
+        run: |
+          mkdir -p site
+          cd src && python -m feedgen --out ../site/feed.json --state ../site/state
+
+      - name: Publish to gh-pages
+        working-directory: site
+        run: |
+          touch .nojekyll
+          rm -rf .git
+          git init -q -b gh-pages
+          git config user.name "carmelovarela"
+          git config user.email "57266293+carmelovarela@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Feed $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
+
+      - name: Weekly snapshot
+        uses: actions/checkout@v4
+        with:
+          path: main
+      - run: |
+          week=$(date -u +%G-W%V)
+          if [ ! -f "main/history/$week.json" ]; then
+            mkdir -p main/history && cp site/feed.json "main/history/$week.json"
+            cd main
+            git config user.name "carmelovarela"
+            git config user.email "57266293+carmelovarela@users.noreply.github.com"
+            git add history && git commit -q -m "Snapshot $week" && git push -q
+          fi
