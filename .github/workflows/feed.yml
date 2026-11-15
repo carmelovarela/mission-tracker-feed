@@ -25,7 +25,7 @@ permissions:
   contents: write
 
 env:
-  FEEDGEN_REF: own-feed   # switch to main once own-feed is merged
+  FEEDGEN_REF: main
 
 jobs:
   build:
