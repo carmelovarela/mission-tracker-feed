@@ -14,7 +14,7 @@ name: feed
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # GitHub may start scheduled runs some minutes late
+    - cron: '7,22,37,52 * * * *'   # every 15 min, off the busy :00/:15/:30/:45 marks; runs can still start late
   workflow_dispatch:
 
 concurrency:
